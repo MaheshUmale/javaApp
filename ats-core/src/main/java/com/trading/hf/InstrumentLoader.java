@@ -15,48 +15,30 @@ public class InstrumentLoader {
     private static final Logger logger = LoggerFactory.getLogger(InstrumentLoader.class);
     private final String dbPath;
     private final String jsonGzPath;
-    private final String jsonPath;
 
-    public InstrumentLoader(String dbPath, String jsonGzPath, String jsonPath) {
+    public InstrumentLoader(String dbPath, String jsonGzPath) {
         this.dbPath = dbPath;
         this.jsonGzPath = jsonGzPath;
-        this.jsonPath = jsonPath;
     }
 
     public void processDaily() {
         try {
             if (Files.exists(Paths.get(jsonGzPath))) {
-                logger.info("Extracting {}...", jsonGzPath);
-                extractGz(jsonGzPath, jsonPath);
-            }
-
-            if (Files.exists(Paths.get(jsonPath))) {
-                logger.info("Loading {} into SQLite...", jsonPath);
-                loadIntoSQLite();
+                logger.info("Loading {} directly into SQLite...", jsonGzPath);
+                loadGzIntoSQLite();
             } else {
-                logger.warn("NSE.json not found at {}", jsonPath);
+                logger.warn("Instrument GZ file not found at {}", jsonGzPath);
             }
         } catch (Exception e) {
             logger.error("Error processing daily instruments", e);
         }
     }
 
-    private void extractGz(String gzFile, String outFile) throws IOException {
-        try (GZIPInputStream gzis = new GZIPInputStream(new FileInputStream(gzFile));
-             FileOutputStream out = new FileOutputStream(outFile)) {
-            byte[] buffer = new byte[1024];
-            int len;
-            while ((len = gzis.read(buffer)) > 0) {
-                out.write(buffer, 0, len);
-            }
-        }
-    }
-
-    private void loadIntoSQLite() throws SQLException, IOException {
+    private void loadGzIntoSQLite() throws SQLException, IOException {
         String url = "jdbc:sqlite:" + dbPath;
         try (Connection conn = DriverManager.getConnection(url);
              Statement stmt = conn.createStatement()) {
-            
+
             stmt.execute("DROP TABLE IF EXISTS instruments");
             stmt.execute("CREATE TABLE instruments (" +
                     "instrument_key TEXT PRIMARY KEY," +
@@ -77,38 +59,42 @@ public class InstrumentLoader {
 
             conn.setAutoCommit(false);
             String sql = "INSERT INTO instruments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                Gson gson = new Gson();
-                try (JsonReader reader = new JsonReader(new FileReader(jsonPath))) {
-                    reader.beginArray();
-                    int count = 0;
-                    while (reader.hasNext()) {
-                        Map<String, Object> map = gson.fromJson(reader, Map.class);
-                        pstmt.setString(1, getString(map.get("instrument_key")));
-                        pstmt.setString(2, getString(map.get("exchange_token")));
-                        pstmt.setString(3, getString(map.get("trading_symbol")));
-                        pstmt.setString(4, getString(map.get("name")));
-                        pstmt.setDouble(5, getDouble(map.get("last_price")));
-                        pstmt.setString(6, getString(map.get("expiry")));
-                        pstmt.setDouble(7, getDouble(map.get("strike")));
-                        pstmt.setDouble(8, getDouble(map.get("tick_size")));
-                        pstmt.setInt(9, getInt(map.get("lot_size")));
-                        pstmt.setString(10, getString(map.get("instrument_type")));
-                        pstmt.setString(11, getString(map.get("segment")));
-                        pstmt.setString(12, getString(map.get("exchange")));
-                        pstmt.setString(13, getString(map.get("underlying_symbol")));
-                        pstmt.setString(14, getString(map.get("underlying_key")));
-                        pstmt.addBatch();
+            try (PreparedStatement pstmt = conn.prepareStatement(sql);
+                 FileInputStream fis = new FileInputStream(jsonGzPath);
+                 GZIPInputStream gzis = new GZIPInputStream(fis);
+                 InputStreamReader isr = new InputStreamReader(gzis);
+                 JsonReader reader = new JsonReader(isr)) {
 
-                        if (++count % 5000 == 0) {
-                            pstmt.executeBatch();
-                            conn.commit();
-                        }
+                Gson gson = new Gson();
+                reader.beginArray();
+                int count = 0;
+                while (reader.hasNext()) {
+                    Map<String, Object> map = gson.fromJson(reader, Map.class);
+                    pstmt.setString(1, getString(map.get("instrument_key")));
+                    pstmt.setString(2, getString(map.get("exchange_token")));
+                    pstmt.setString(3, getString(map.get("trading_symbol")));
+                    pstmt.setString(4, getString(map.get("name")));
+                    pstmt.setDouble(5, getDouble(map.get("last_price")));
+                    pstmt.setString(6, getString(map.get("expiry")));
+                    pstmt.setDouble(7, getDouble(map.get("strike")));
+                    pstmt.setDouble(8, getDouble(map.get("tick_size")));
+                    pstmt.setInt(9, getInt(map.get("lot_size")));
+                    pstmt.setString(10, getString(map.get("instrument_type")));
+                    pstmt.setString(11, getString(map.get("segment")));
+                    pstmt.setString(12, getString(map.get("exchange")));
+                    pstmt.setString(13, getString(map.get("underlying_symbol")));
+                    pstmt.setString(14, getString(map.get("underlying_key")));
+                    pstmt.addBatch();
+
+                    if (++count % 5000 == 0) {
+                        pstmt.executeBatch();
+                        conn.commit();
+                        logger.debug("Committed {} instruments...", count);
                     }
-                    pstmt.executeBatch();
-                    conn.commit();
-                    logger.info("Loaded {} instruments into SQLite.", count);
                 }
+                pstmt.executeBatch();
+                conn.commit();
+                logger.info("Loaded a total of {} instruments into SQLite.", count);
             }
         }
     }
@@ -152,7 +138,7 @@ public class InstrumentLoader {
     public List<String> getOptionKeysByATM(String underlying, double atmPrice, int range) {
         String expiry = getNearestExpiry(underlying);
         if (expiry == null) return Collections.emptyList();
-        
+
         int atmStrike = (int) (Math.round(atmPrice / 50.0) * 50);
         return getOptionKeys(underlying, atmStrike, range, expiry);
     }
@@ -186,14 +172,14 @@ public class InstrumentLoader {
                      "AND strike >= ? AND strike <= ? " +
                      "AND expiry = ? " +
                      "AND instrument_type IN ('CE', 'PE')";
-        
+
         try (Connection conn = DriverManager.getConnection(url);
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, index);
             pstmt.setDouble(2, atmStrike - (range * 50)); // Assuming 50 point intervals for NIFTY
             pstmt.setDouble(3, atmStrike + (range * 50));
             pstmt.setString(4, expiry);
-            
+
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
                     keys.add(rs.getString("instrument_key"));
