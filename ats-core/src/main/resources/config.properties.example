@@ -1,0 +1,17 @@
+# Application Run Mode: "live" or "simulation"
+run.mode=simulation
+
+# Upstox API Access Token (only required for "live" mode)
+upstox.accessToken=YOUR_ACCESS_TOKEN_HERE
+
+# QuestDB Integration
+questdb.enabled=false
+
+# Dashboard UI
+dashboard.enabled=true
+
+# Simulation event delay in milliseconds
+simulation.event.delay.ms=10
+
+# Replay source: "sample_data" (for now)
+replay.source=sample_data

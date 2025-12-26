@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+/* Luminance Principle: Active Signals */
+.signal-buy {
+  box-shadow: 0 0 10px #00FF41;
+}
+
+.signal-sell {
+  box-shadow: 0 0 10px #FF3131;
+}

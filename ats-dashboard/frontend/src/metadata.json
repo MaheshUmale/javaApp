@@ -1,0 +1,5 @@
+{
+  "name": "Jules-HF-ATS Dashboard",
+  "description": "A high-fidelity algorithmic trading system dashboard featuring live option chains, auction profiles, trade panels, and sentiment analysis.",
+  "requestFramePermissions": []
+}

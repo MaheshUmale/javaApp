@@ -1,0 +1,14 @@
+{
+  "NIFTY50": [
+    {"rank": 1, "symbol": "RELIANCE", "name": "Reliance Industries Ltd", "weight": 10.15, "sector": "Energy"},
+    {"rank": 2, "symbol": "HDFCBANK", "name": "HDFC Bank Ltd", "weight": 7.32, "sector": "Financial Services"},
+    {"rank": 3, "symbol": "BHARTIARTL", "name": "Bharti Airtel Ltd", "weight": 6.17, "sector": "Telecommunication"},
+    {"rank": 4, "symbol": "TCS", "name": "Tata Consultancy Services Ltd", "weight": 5.72, "sector": "IT"},
+    {"rank": 5, "symbol": "ICICIBANK", "name": "ICICI Bank Ltd", "weight": 4.65, "sector": "Financial Services"},
+    {"rank": 6, "symbol": "SBIN", "name": "State Bank of India", "weight": 4.28, "sector": "Financial Services"},
+    {"rank": 7, "symbol": "INFY", "name": "Infosys Ltd", "weight": 3.23, "sector": "IT"},
+    {"rank": 8, "symbol": "BAJFINANCE", "name": "Bajaj Finance Ltd", "weight": 3.00, "sector": "Financial Services"},
+    {"rank": 9, "symbol": "LT", "name": "Larsen & Toubro Ltd", "weight": 2.67, "sector": "Construction"},
+    {"rank": 10, "symbol": "HINDUNILVR", "name": "Hindustan Unilever Ltd", "weight": 2.58, "sector": "FMCG"}
+  ]
+}
