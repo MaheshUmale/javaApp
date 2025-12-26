@@ -35,8 +35,13 @@ This document provides a comprehensive overview of the JULES-HF-ATS application,
 5.  [Frontend: `ats-dashboard/frontend`](#frontend-ats-dashboardfrontend)
     -   [Hook: `useWebSocketBuffer.js`](#hook-usewebsocketbufferjs)
     -   [Component: `Dashboard.jsx`](#component-dashboardjsx)
-6.  [Replay & Performance Persistence](#replay--performance-persistence)
-7.  [Data Utilities & JSON Format](#data-utilities--json-format)
+    -   [Component: `Header.jsx`](#component-headerjsx)
+    -   [Component: `AuctionWidget.jsx`](#component-auctionwidgetjsx)
+    -   [Component: `HeavyweightWidget.jsx`](#component-heavyweightwidgetjsx)
+    -   [Component: `OptionChain.jsx`](#component-optionchainjsx)
+    -   [Component: `TradePanel.jsx`](#component-tradepaneljax)
+    -   [Component: `SentimentWidget.jsx`](#component-sentimentwidgetjsx)
+    -   [Component: `ActiveTradesWidget.jsx`](#component-activetradeswidgetjsx)
 
 ---
 
@@ -233,7 +238,7 @@ This is the root package for all core application logic.
 
 *   **Purpose**: This is the default implementation of `IDataReplayer`. It is responsible for reading market data from gzipped JSON files located in the project's resources directory, simulating a live data feed for development, testing, and backtesting purposes.
 *   **Logic**:
-    *   It identifies a configured list of `.json.gz` files (specifically `simulation_data.json.gz`) within the specified `data` directory in the classpath.
+    *   It identifies a hardcoded list of `.json.gz` files within the specified `data` directory in the classpath.
     *   For each file, it streams the content, decompresses it, and parses the JSON array into a list of generic `Map<String, Object>` records.
     *   It iterates through each record, introducing a configurable delay (`simulation.event.delay.ms`) between each event to simulate real-time market pacing.
     *   For each record, it calls the `publishMarketUpdate` method.
@@ -372,9 +377,7 @@ This is the root package for all core application logic.
     *   **Order Placement**: The `placeOrder` method constructs a `PlaceOrderRequest` object, populating it with details like instrument, quantity, side, and order type.
     *   **Position Tracking Caveat**: A critical piece of logic resides here. After a successful order placement, the manager attempts to update the `PositionManager`.
         *   For **LIMIT** orders, it assumes the fill price is the same as the order price and immediately adds the position.
-        *   For **MARKET** orders, the final fill price is unknown when the order is placed. The system logs a warning as it cannot accurately track the entry price without a post-trade confirmation feed.
-*   **Order Modification & Cancellation**:
-    *   The manager provides `modifyOrder` and `cancelOrder` methods that wrap the Upstox API calls, allowing for full lifecycle management of orders.
+        *   For **MARKET** orders, the final fill price is unknown when the order is placed. To avoid tracking positions with inaccurate entry prices, it logs a critical warning and **does not** add the position to the manager. This highlights a known limitation: the system requires a separate "fill-tracking" service (e.g., a webhook or polling mechanism) for accurate P&L on market orders.
 *   **API Interaction**:
     *   `POST /v2/order/place`: To place a new order.
     *   `PUT /v2/order/modify`: To modify a pending order.
@@ -382,12 +385,17 @@ This is the root package for all core application logic.
 
 #### Class: `ThetaExitGuard`
 
-*   **Purpose**: This `EventHandler` monitors open positions and automatically triggers an exit order if the position's value deteriorates due to time decay (theta) beyond a certain threshold.
-*   **Logic**:
-    *   For each incoming `MarketEvent` (which now includes `theta` from the Upstox feed), it checks if the event's instrument corresponds to an open position.
-    *   It calculates the theoretical loss due to theta decay: `theta * time_in_market`.
-    *   It also tracks the unrealized P&L based on LTP.
-    *   **Exit Condition**: If `theta_loss` exceeds the pre-defined safety threshold (indicating that time decay is eating into the trade thesis too rapidly), it triggers an exit signal to close the position.
+*   **WARNING**: This class is **non-functional** in its current state. Its logic depends on a `getTheta()` method on the `MarketEvent` object, which does not exist in the current data model. The documentation below describes its intended, hypothetical functionality.
+*   **Purpose**: This class is intended to be a risk management component. As an `EventHandler`, it would monitor open positions and automatically trigger an exit order if the position's value deteriorates due to time decay (theta) beyond a certain threshold.
+*   **Intended Logic**:
+    *   For each incoming `MarketEvent`, it would check if the event's instrument corresponds to an open position in the `PositionManager`.
+    *   If it does, it would calculate the current unrealized Profit and Loss (P&L) of the position.
+    *   It would then calculate the theoretical loss due to theta decay based on how long the position has been open.
+    *   If the combined P&L and theta decay loss exceeds a predefined threshold, it would automatically place a market order to close the position.
+*   **Hypothetical Calculations**:
+    *   **P&L**: `(current_ltp - entry_price) * quantity` (for a BUY position).
+    *   **Theta Decay Loss**: `theta_value * time_in_market`
+    *   **Exit Condition**: `pnl + theta_decay_loss < -THETA_DECAY_THRESHOLD`
 
 #### Class: `QuestDBWriter`
 
@@ -500,56 +508,7 @@ The following components receive the `data` prop from `Dashboard.jsx` and are re
 *   **`Header.jsx`**: Displays the global information from the top level of the view model, such as the current timestamp, symbol, and spot price.
 *   **`AuctionWidget.jsx`**: Visualizes the data from `data.auctionProfile`, displaying the Value Area High (VAH), Value Area Low (VAL), and Point of Control (POC).
 *   **`HeavyweightWidget.jsx`**: Renders the list of heavyweight stocks from `data.heavyweights` and displays the `data.aggregateWeightedDelta`, likely as a summary bar or gauge.
-*   **`OptionChain.jsx`**: Renders the `data.option_window` array into a table, showing the strike, LTP, and OI change for the active options window. It applies conditional styling based on the `sentiment` field and features a symmetrical layout around the strike price.
-*   **`TradePanel.jsx`**: Displays information relevant to trade execution, such as the `data.theta_gcr` value and OHLC candles for the focused instrument.
-*   **`SentimentWidget.jsx`**: Displays the overall market sentiment, primarily the `data.auctionState` (e.g., "ROTATION", "INITIATIVE_BUY") and global alerts.
-*   **`ActiveTradesWidget.jsx`**: Displays live positions from `data.activeTrades`, including entry price, current P&L, and strategy state.
-
----
-
-## 7. Data Utilities & JSON Format
-
-### Data Utilities
-
-#### `extract_mongo_data.py`
-*   **Location**: `scripts/extract_mongo_data.py`
-*   **Purpose**: Extracts tick data from a local MongoDB instance for simulation replay.
-*   **Configuration**:
-    *   Connects to `mongodb://localhost:27017/`.
-    *   Database: `upstox_strategy_db`, Collection: `tick_data`.
-*   **Logic**: Exports the last 5000 records, grouped by 1-second intervals, to `data/simulation_data.json.gz`.
-
-### Market Data JSON Format
-
-The application expects a gzipped JSON file containing a single JSON array for simulation. Each element represents a market data tick.
-
-#### Minimal Example
-```json
-{
-  "feeds": {
-    "NSE_EQ_TEST": {
-      "fullFeed": {
-        "marketFF": {
-          "ltpc": {
-            "ltp": 100.0,
-            "ltq": "1",
-            "ltt": "1672531200000",
-            "cp": 100.0
-          },
-          "marketLevel": {
-            "bidAskQuote": [{"bidP": 99.95, "askP": 100.05}]
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-#### Field Descriptions
-*   `ltp`: Last Traded Price (Number)
-*   `ltq`: Last Traded Quantity (String)
-*   `ltt`: Last Traded Time in ms (String)
-*   `bidP` / `askP`: Best Bid/Ask prices (Number)
-*   `oi`: Open Interest (Number)
-*   `vtt`: Volume Traded Today (String)
+*   **`OptionChain.jsx`**: Renders the `data.optionChain` array into a table, showing the strike, LTP, and OI change for the active options window. It likely applies conditional styling based on the `sentiment` field.
+*   **`TradePanel.jsx`**: Displays information relevant to trade execution, such as the `data.thetaGuard` timer.
+*   **`SentimentWidget.jsx`**: Displays the overall market sentiment, primarily the `data.auctionState` (e.g., "ROTATION", "DISCOVERY_UP").
+*   **`ActiveTradesWidget.jsx`**: (No direct data feed in the view model). This component would be responsible for displaying the user's current open positions, likely by fetching them from a separate API endpoint in the future.
