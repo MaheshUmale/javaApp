@@ -15,26 +15,44 @@ public class InstrumentLoader {
     private static final Logger logger = LoggerFactory.getLogger(InstrumentLoader.class);
     private final String dbPath;
     private final String jsonGzPath;
+    private final String jsonPath;
 
-    public InstrumentLoader(String dbPath, String jsonGzPath) {
+    public InstrumentLoader(String dbPath, String jsonGzPath, String jsonPath) {
         this.dbPath = dbPath;
         this.jsonGzPath = jsonGzPath;
+        this.jsonPath = jsonPath;
     }
 
     public void processDaily() {
         try {
             if (Files.exists(Paths.get(jsonGzPath))) {
-                logger.info("Loading {} directly into SQLite...", jsonGzPath);
-                loadGzIntoSQLite();
+                logger.info("Extracting {}...", jsonGzPath);
+                extractGz(jsonGzPath, jsonPath);
+            }
+
+            if (Files.exists(Paths.get(jsonPath))) {
+                logger.info("Loading {} into SQLite...", jsonPath);
+                loadIntoSQLite();
             } else {
-                logger.warn("Instrument GZ file not found at {}", jsonGzPath);
+                logger.warn("NSE.json not found at {}", jsonPath);
             }
         } catch (Exception e) {
             logger.error("Error processing daily instruments", e);
         }
     }
 
-    private void loadGzIntoSQLite() throws SQLException, IOException {
+    private void extractGz(String gzFile, String outFile) throws IOException {
+        try (GZIPInputStream gzis = new GZIPInputStream(new FileInputStream(gzFile));
+             FileOutputStream out = new FileOutputStream(outFile)) {
+            byte[] buffer = new byte[1024];
+            int len;
+            while ((len = gzis.read(buffer)) > 0) {
+                out.write(buffer, 0, len);
+            }
+        }
+    }
+
+    private void loadIntoSQLite() throws SQLException, IOException {
         String url = "jdbc:sqlite:" + dbPath;
         try (Connection conn = DriverManager.getConnection(url);
              Statement stmt = conn.createStatement()) {
@@ -59,42 +77,38 @@ public class InstrumentLoader {
 
             conn.setAutoCommit(false);
             String sql = "INSERT INTO instruments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-            try (PreparedStatement pstmt = conn.prepareStatement(sql);
-                 FileInputStream fis = new FileInputStream(jsonGzPath);
-                 GZIPInputStream gzis = new GZIPInputStream(fis);
-                 InputStreamReader isr = new InputStreamReader(gzis);
-                 JsonReader reader = new JsonReader(isr)) {
-
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
                 Gson gson = new Gson();
-                reader.beginArray();
-                int count = 0;
-                while (reader.hasNext()) {
-                    Map<String, Object> map = gson.fromJson(reader, Map.class);
-                    pstmt.setString(1, getString(map.get("instrument_key")));
-                    pstmt.setString(2, getString(map.get("exchange_token")));
-                    pstmt.setString(3, getString(map.get("trading_symbol")));
-                    pstmt.setString(4, getString(map.get("name")));
-                    pstmt.setDouble(5, getDouble(map.get("last_price")));
-                    pstmt.setString(6, getString(map.get("expiry")));
-                    pstmt.setDouble(7, getDouble(map.get("strike")));
-                    pstmt.setDouble(8, getDouble(map.get("tick_size")));
-                    pstmt.setInt(9, getInt(map.get("lot_size")));
-                    pstmt.setString(10, getString(map.get("instrument_type")));
-                    pstmt.setString(11, getString(map.get("segment")));
-                    pstmt.setString(12, getString(map.get("exchange")));
-                    pstmt.setString(13, getString(map.get("underlying_symbol")));
-                    pstmt.setString(14, getString(map.get("underlying_key")));
-                    pstmt.addBatch();
+                try (JsonReader reader = new JsonReader(new FileReader(jsonPath))) {
+                    reader.beginArray();
+                    int count = 0;
+                    while (reader.hasNext()) {
+                        Map<String, Object> map = gson.fromJson(reader, Map.class);
+                        pstmt.setString(1, getString(map.get("instrument_key")));
+                        pstmt.setString(2, getString(map.get("exchange_token")));
+                        pstmt.setString(3, getString(map.get("trading_symbol")));
+                        pstmt.setString(4, getString(map.get("name")));
+                        pstmt.setDouble(5, getDouble(map.get("last_price")));
+                        pstmt.setString(6, getString(map.get("expiry")));
+                        pstmt.setDouble(7, getDouble(map.get("strike")));
+                        pstmt.setDouble(8, getDouble(map.get("tick_size")));
+                        pstmt.setInt(9, getInt(map.get("lot_size")));
+                        pstmt.setString(10, getString(map.get("instrument_type")));
+                        pstmt.setString(11, getString(map.get("segment")));
+                        pstmt.setString(12, getString(map.get("exchange")));
+                        pstmt.setString(13, getString(map.get("underlying_symbol")));
+                        pstmt.setString(14, getString(map.get("underlying_key")));
+                        pstmt.addBatch();
 
-                    if (++count % 5000 == 0) {
-                        pstmt.executeBatch();
-                        conn.commit();
-                        logger.debug("Committed {} instruments...", count);
+                        if (++count % 5000 == 0) {
+                            pstmt.executeBatch();
+                            conn.commit();
+                        }
                     }
+                    pstmt.executeBatch();
+                    conn.commit();
+                    logger.info("Loaded {} instruments into SQLite.", count);
                 }
-                pstmt.executeBatch();
-                conn.commit();
-                logger.info("Loaded a total of {} instruments into SQLite.", count);
             }
         }
     }
