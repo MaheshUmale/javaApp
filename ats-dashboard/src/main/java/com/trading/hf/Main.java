@@ -36,7 +36,7 @@ public class Main {
         SignalEngine signalEngine = new SignalEngine(auctionProfileCalculator);
         
         // --- Daily Instrument Mapping ---
-        InstrumentLoader loader = new InstrumentLoader("instruments.db", "NSE.JSON.gz", "NSE.json");
+        InstrumentLoader loader = new InstrumentLoader("instruments.db", "NSE.JSON.gz");
         AutoInstrumentManager autoInstrumentManager = new AutoInstrumentManager(loader, "mapped_instruments.json");
         autoInstrumentManager.initialize();
         DashboardBridge.setNiftyFutureKey(autoInstrumentManager.getNiftyFutureKey());
