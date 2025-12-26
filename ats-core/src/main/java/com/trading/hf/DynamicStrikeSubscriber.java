@@ -31,7 +31,7 @@ public class DynamicStrikeSubscriber {
         this.optionContractService = optionContractService;
     }
 
-    public void onNiftySpotPrice(double spotPrice) {
+    public void onSpotPrice(double spotPrice) {
         if (lastExpiryCheckDate == null || !LocalDate.now().isEqual(lastExpiryCheckDate)) {
             lastExpiryCheckDate = LocalDate.now();
             if (optionContractService != null) {

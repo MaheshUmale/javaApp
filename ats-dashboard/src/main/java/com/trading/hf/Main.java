@@ -16,7 +16,12 @@ public class Main {
     public static void main(String[] args) {
         // --- Configuration ---
         String runMode = ConfigLoader.getProperty("run.mode", "live");
-        
+        String indexName = ConfigLoader.getProperty("index.name", "NIFTY");
+        String indexSuffix = ConfigLoader.getProperty("index.suffix", "50");
+        String indexHeavyweightsFile = ConfigLoader.getProperty("index.heavyweights.file", "IndexWeights.json");
+        String indexInstrumentKey = ConfigLoader.getProperty("index.instrument.key", "NSE_INDEX|Nifty 50");
+        String indexSpotSymbol = ConfigLoader.getProperty("index.spot.symbol", "Nifty 50");
+
         // Command line override: java -jar app.jar simulation
         if (args.length > 0) {
             runMode = args[0];
@@ -34,7 +39,7 @@ public class Main {
 
         AuctionProfileCalculator auctionProfileCalculator = new AuctionProfileCalculator();
         SignalEngine signalEngine = new SignalEngine(auctionProfileCalculator);
-        
+
         // --- Daily Instrument Mapping ---
         InstrumentLoader loader = new InstrumentLoader("instruments.db", "NSE.JSON.gz", "NSE.json");
         AutoInstrumentManager autoInstrumentManager = new AutoInstrumentManager(loader, "mapped_instruments.json");
@@ -42,8 +47,8 @@ public class Main {
         DashboardBridge.setNiftyFutureKey(autoInstrumentManager.getNiftyFutureKey());
 
         InstrumentMaster instrumentMaster = new InstrumentMaster("instrument-master.json");
-        IndexWeightCalculator indexWeightCalculator = new IndexWeightCalculator("IndexWeights.json", instrumentMaster);
-        OptionChainProvider optionChainProvider = new OptionChainProvider(instrumentMaster);
+        IndexWeightCalculator indexWeightCalculator = new IndexWeightCalculator(indexHeavyweightsFile, indexName + indexSuffix, instrumentMaster);
+        OptionChainProvider optionChainProvider = new OptionChainProvider(instrumentMaster, indexInstrumentKey, indexSpotSymbol);
         PositionManager positionManager = new PositionManager();
         UpstoxOrderManager orderManager = new UpstoxOrderManager(null, positionManager); // Access token will be set if live
         ThetaExitGuard thetaExitGuard = new ThetaExitGuard(positionManager, orderManager);
@@ -80,7 +85,7 @@ public class Main {
                 heavyweightWriter,
                 List.of((event, seq, end) -> DashboardBridge.onMarketEvent(event)),
                 paperTradingEngine);
-        
+
         signalEngine.setSignalRingBuffer(disruptorManager.getSignalRingBuffer());
         orderManager.setOrderRingBuffer(disruptorManager.getOrderRingBuffer());
         indexWeightCalculator.setHeavyweightRingBuffer(disruptorManager.getHeavyweightRingBuffer());
@@ -108,14 +113,14 @@ public class Main {
             }
 
             Set<String> initialInstrumentKeys = new HashSet<>();
-            
+
             // Add Nifty Index and Future from mapping
             String niftyIndexKey = autoInstrumentManager.getNiftyIndexKey();
             if (niftyIndexKey != null) initialInstrumentKeys.add(niftyIndexKey);
-            
+
             String niftyFutureKey = autoInstrumentManager.getNiftyFutureKey();
             if (niftyFutureKey != null) initialInstrumentKeys.add(niftyFutureKey);
-            
+
             // Add Equities from mapping
             Map<String, String> equities = (Map<String, String>) autoInstrumentManager.getMappedKeys().get("equities");
             if (equities != null) {
@@ -171,7 +176,7 @@ public class Main {
                     marketDataStreamer.unsubscribe(toUnsubscribe);
                     logger.info("Unsubscribing from: {}", toUnsubscribe);
                 }
-            }, instrumentMaster, "NSE_INDEX|Nifty 50", optionContractService);
+            }, instrumentMaster, indexInstrumentKey, optionContractService);
 
             marketDataStreamer.setStrikeSubscriber(strikeSubscriber);
             marketDataStreamer.connect();

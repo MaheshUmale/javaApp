@@ -153,8 +153,8 @@ public class UpstoxMarketDataStreamer {
                     }
                 }
 
-                if (strikeSubscriber != null && currentSpot > 0 && "NSE_INDEX|Nifty 50".equals(instrumentToken)) {
-                    strikeSubscriber.onNiftySpotPrice(currentSpot);
+                if (strikeSubscriber != null && currentSpot > 0 && instrumentToken.equals(ConfigLoader.getProperty("index.instrument.key"))) {
+                    strikeSubscriber.onSpotPrice(currentSpot);
                 }
 
                 publishMarketEvent(instrumentToken, feed);
