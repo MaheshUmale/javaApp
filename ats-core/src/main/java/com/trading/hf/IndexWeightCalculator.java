@@ -22,8 +22,8 @@ public class IndexWeightCalculator implements EventHandler<MarketEvent> {
     private volatile double aggregateWeightedDelta = 0.0;
     private com.lmax.disruptor.RingBuffer<HeavyweightEvent> heavyweightRingBuffer;
 
-    public IndexWeightCalculator(String indexPath, InstrumentMaster instrumentMaster) {
-        this.heavyweights = loadWeights(indexPath, instrumentMaster);
+    public IndexWeightCalculator(String indexPath, String indexJsonSymbol, InstrumentMaster instrumentMaster) {
+        this.heavyweights = loadWeights(indexPath, indexJsonSymbol, instrumentMaster);
     }
 
     public void setHeavyweightRingBuffer(com.lmax.disruptor.RingBuffer<HeavyweightEvent> heavyweightRingBuffer) {
@@ -89,7 +89,7 @@ public class IndexWeightCalculator implements EventHandler<MarketEvent> {
         return heavyweights.values().stream().map(Heavyweight::getInstrumentKey).collect(Collectors.toSet());
     }
 
-    private Map<String, Heavyweight> loadWeights(String path, InstrumentMaster instrumentMaster) {
+    private Map<String, Heavyweight> loadWeights(String path, String indexJsonSymbol, InstrumentMaster instrumentMaster) {
         Gson gson = new Gson();
         Type type = new TypeToken<Map<String, List<Map<String, Object>>>>() {
         }.getType();

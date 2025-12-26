@@ -15,11 +15,19 @@ public class OptionChainProvider implements EventHandler<MarketEvent> {
     private final Map<String, Double> sessionInitialOi = new ConcurrentHashMap<>();
     private final AtomicReference<Double> spotPrice = new AtomicReference<>(0.0);
     private final InstrumentMaster instrumentMaster;
+    private final String indexInstrumentKey;
+    private final String indexSpotSymbol;
     private static final int STRIKE_DIFFERENCE = 50;
     private static final int WINDOW_SIZE = 4; // ATM +/- 2 strikes
 
-    public OptionChainProvider(InstrumentMaster instrumentMaster) {
+    public OptionChainProvider(InstrumentMaster instrumentMaster, String indexInstrumentKey, String indexSpotSymbol) {
         this.instrumentMaster = instrumentMaster;
+        this.indexInstrumentKey = indexInstrumentKey;
+        this.indexSpotSymbol = indexSpotSymbol;
+    }
+
+    public OptionChainProvider(InstrumentMaster instrumentMaster) {
+        this(instrumentMaster, "NSE_INDEX|Nifty 50", "NIFTY 50");
     }
 
     @Override
@@ -28,7 +36,7 @@ public class OptionChainProvider implements EventHandler<MarketEvent> {
         if (symbol == null)
             return;
 
-        if ("NSE_INDEX|Nifty 50".equals(symbol) || "NIFTY 50".equals(symbol)) {
+        if (indexInstrumentKey.equals(symbol) || indexSpotSymbol.equals(symbol)) {
             spotPrice.set(event.getLtp());
         } else {
             // Check if it's an option via instrument master
@@ -94,6 +102,6 @@ public class OptionChainProvider implements EventHandler<MarketEvent> {
                 putOi += event.getOi();
             }
         }
-        return (callOi == 0) ? 0 : putOi / callOi;
+        return (callOi == 0.0) ? 0 : putOi / callOi;
     }
 }
