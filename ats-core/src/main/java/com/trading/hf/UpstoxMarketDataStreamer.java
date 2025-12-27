@@ -65,43 +65,32 @@ public class UpstoxMarketDataStreamer {
                 .header("Authorization", "Bearer " + token)
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        
-        // Log the raw response for debugging
-        logger.info("WebSocket Auth API Response Status: {}", response.statusCode());
-        logger.info("WebSocket Auth API Response Body: {}", response.body());
-        
+
         Gson gson = new Gson();
         WebSocketAuthResponse authResponse = gson.fromJson(response.body(), WebSocketAuthResponse.class);
-        
-        // Check for null response
+
         if (authResponse == null) {
             throw new IOException("Failed to parse WebSocket auth response. Response body: " + response.body());
         }
-        
-        // Check for error status
+
         if (!"success".equalsIgnoreCase(authResponse.getStatus())) {
             String errorMsg = "WebSocket authorization failed. Status: " + authResponse.getStatus();
             if (authResponse.getErrors() != null && !authResponse.getErrors().isEmpty()) {
                 errorMsg += ", Errors: " + authResponse.getErrors();
             }
-            errorMsg += ", Response: " + response.body();
             throw new IOException(errorMsg);
         }
-        
-        // Check for null data
+
         if (authResponse.getData() == null) {
-            throw new IOException("WebSocket auth response missing 'data' field. Status: " 
-                + authResponse.getStatus() + ", Response: " + response.body());
+            throw new IOException("WebSocket auth response missing 'data' field. Status: "
+                + authResponse.getStatus());
         }
-        
-        // Check for null URI
+
         String redirectUri = authResponse.getData().getAuthorizedRedirectUri();
         if (redirectUri == null || redirectUri.isEmpty()) {
-            throw new IOException("WebSocket auth response missing 'authorized_redirect_uri'. Response: " 
-                + response.body());
+            throw new IOException("WebSocket auth response missing 'authorized_redirect_uri'.");
         }
-        
-        logger.info("WebSocket URL obtained successfully: {}", redirectUri);
+
         return URI.create(redirectUri);
     }
 
@@ -115,7 +104,7 @@ public class UpstoxMarketDataStreamer {
 
             @Override
             public void onMessage(String message) {
-                logger.info("Received Text Message: {}", message);
+                // Not used
             }
 
             @Override
@@ -142,7 +131,6 @@ public class UpstoxMarketDataStreamer {
             bytes.get(data);
             MarketDataFeed.FeedResponse feedResponse = MarketDataFeed.FeedResponse.parseFrom(data);
             feedResponse.getFeedsMap().forEach((instrumentToken, feed) -> {
-                // Determine spot price from either ltpc or indexFF
                 double currentSpot = -1;
                 if (feed.hasLtpc()) {
                     currentSpot = feed.getLtpc().getLtp();
@@ -172,14 +160,12 @@ public class UpstoxMarketDataStreamer {
     private void sendSubscriptionRequest(WebSocketClient client, Set<String> instruments) {
         JsonObject requestObject = constructSubscriptionRequest("sub", instruments);
         byte[] binaryData = requestObject.toString().getBytes(StandardCharsets.UTF_8);
-        logger.info("Sending Subscription Request: {}", requestObject);
         client.send(binaryData);
     }
 
     private void sendUnsubscriptionRequest(WebSocketClient client, Set<String> instruments) {
         JsonObject requestObject = constructSubscriptionRequest("unsub", instruments);
         byte[] binaryData = requestObject.toString().getBytes(StandardCharsets.UTF_8);
-        logger.info("Sending Unsubscription Request: {}", requestObject);
         client.send(binaryData);
     }
 
@@ -222,6 +208,7 @@ public class UpstoxMarketDataStreamer {
 
                 if (mff.hasOptionGreeks()) {
                     event.setTheta(mff.getOptionGreeks().getTheta());
+                    event.setOptionDelta(mff.getOptionGreeks().getDelta());
                 }
 
                 if (mff.hasMarketOHLC()) {
@@ -280,7 +267,7 @@ public class UpstoxMarketDataStreamer {
                 if (quotes != null && !quotes.isEmpty()) {
                     event.setBestBid(quotes.get(0).getBidP());
                     event.setBestAsk(quotes.get(0).getAskP());
-                    
+
                     event.setBids(quotes.stream()
                             .map(q -> new RawFeedEvent.BookEntry(q.getBidP(), q.getBidQ(), 0))
                             .collect(Collectors.toList()));
@@ -319,70 +306,32 @@ public class UpstoxMarketDataStreamer {
         }
     }
 }
-
-// Helper class for JSON deserialization of the auth response
 class WebSocketAuthResponse {
     private String status;
     private Data data;
     private java.util.List<Error> errors;
 
-    public String getStatus() {
-        return status;
-    }
-
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
-    public Data getData() {
-        return data;
-    }
-
-    public void setData(Data data) {
-        this.data = data;
-    }
-
-    public java.util.List<Error> getErrors() {
-        return errors;
-    }
-
-    public void setErrors(java.util.List<Error> errors) {
-        this.errors = errors;
-    }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public Data getData() { return data; }
+    public void setData(Data data) { this.data = data; }
+    public java.util.List<Error> getErrors() { return errors; }
+    public void setErrors(java.util.List<Error> errors) { this.errors = errors; }
 
     public static class Data {
         @SerializedName("authorized_redirect_uri")
         private String authorizedRedirectUri;
-
-        public String getAuthorizedRedirectUri() {
-            return authorizedRedirectUri;
-        }
-
-        public void setAuthorizedRedirectUri(String authorizedRedirectUri) {
-            this.authorizedRedirectUri = authorizedRedirectUri;
-        }
+        public String getAuthorizedRedirectUri() { return authorizedRedirectUri; }
+        public void setAuthorizedRedirectUri(String authorizedRedirectUri) { this.authorizedRedirectUri = authorizedRedirectUri; }
     }
 
     public static class Error {
         private String errorCode;
         private String message;
-
-        public String getErrorCode() {
-            return errorCode;
-        }
-
-        public void setErrorCode(String errorCode) {
-            this.errorCode = errorCode;
-        }
-
-        public String getMessage() {
-            return message;
-        }
-
-        public void setMessage(String message) {
-            this.message = message;
-        }
-
+        public String getErrorCode() { return errorCode; }
+        public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
+        public String getMessage() { return message; }
+        public void setMessage(String message) { this.message = message; }
         @Override
         public String toString() {
             return "Error{errorCode='" + errorCode + "', message='" + message + "'}";

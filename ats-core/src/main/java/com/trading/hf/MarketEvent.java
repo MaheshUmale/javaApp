@@ -22,6 +22,7 @@ public class MarketEvent {
     private double dayHigh;
     private double dayLow;
     private double dayClose;
+    private double optionDelta;
 
     // Padding to prevent false sharing
     private long p1, p2, p3, p4, p5, p6, p7;
@@ -176,6 +177,14 @@ public class MarketEvent {
 
     public void setDayClose(double dayClose) {
         this.dayClose = dayClose;
+    }
+
+    public double getOptionDelta() {
+        return optionDelta;
+    }
+
+    public void setOptionDelta(double optionDelta) {
+        this.optionDelta = optionDelta;
     }
 
     public final static EventFactory<MarketEvent> EVENT_FACTORY = MarketEvent::new;

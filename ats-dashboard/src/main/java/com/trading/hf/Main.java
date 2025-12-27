@@ -9,12 +9,12 @@ import com.lmax.disruptor.EventHandler;
 import com.trading.hf.dashboard.DashboardBridge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.trading.hf.alphapulse.AlphaPulseEngine;
 
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
-        // --- Configuration ---
         String runMode = ConfigLoader.getProperty("run.mode", "live");
         String indexName = ConfigLoader.getProperty("index.name", "NIFTY");
         String indexSuffix = ConfigLoader.getProperty("index.suffix", "50");
@@ -22,35 +22,22 @@ public class Main {
         String indexInstrumentKey = ConfigLoader.getProperty("index.instrument.key", "NSE_INDEX|Nifty 50");
         String indexSpotSymbol = ConfigLoader.getProperty("index.spot.symbol", "Nifty 50");
 
-        // Command line override: java -jar app.jar simulation
         if (args.length > 0) {
             runMode = args[0];
-            logger.info("Mode overridden by command line argument: {}", runMode);
         }
 
         boolean questDbEnabled = ConfigLoader.getBooleanProperty("questdb.enabled", false);
-        long volumeThreshold = ConfigLoader.getLongProperty("volume.bar.threshold", 100);
         String dataDirectory = "data";
 
-        // --- Initialization ---
         boolean dashboardEnabled = ConfigLoader.getBooleanProperty("dashboard.enabled", true);
         QuestDBWriter questDBWriter = questDbEnabled ? new QuestDBWriter() : null;
         RawFeedWriter rawFeedWriter = new RawFeedWriter();
-
-        AuctionProfileCalculator auctionProfileCalculator = new AuctionProfileCalculator();
-        SignalEngine signalEngine = new SignalEngine(auctionProfileCalculator);
-
-        // --- Daily Instrument Mapping ---
-        InstrumentLoader loader = new InstrumentLoader("instruments.db", "NSE.JSON.gz", "NSE.json");
-        AutoInstrumentManager autoInstrumentManager = new AutoInstrumentManager(loader, "mapped_instruments.json");
-        autoInstrumentManager.initialize();
-        DashboardBridge.setNiftyFutureKey(autoInstrumentManager.getNiftyFutureKey());
 
         InstrumentMaster instrumentMaster = new InstrumentMaster("instrument-master.json");
         IndexWeightCalculator indexWeightCalculator = new IndexWeightCalculator(indexHeavyweightsFile, indexName + indexSuffix, instrumentMaster);
         OptionChainProvider optionChainProvider = new OptionChainProvider(instrumentMaster, indexInstrumentKey, indexSpotSymbol);
         PositionManager positionManager = new PositionManager();
-        UpstoxOrderManager orderManager = new UpstoxOrderManager(null, positionManager); // Access token will be set if live
+        UpstoxOrderManager orderManager = new UpstoxOrderManager(null, positionManager);
         ThetaExitGuard thetaExitGuard = new ThetaExitGuard(positionManager, orderManager);
 
         SignalPersistenceWriter signalPersistenceWriter = questDbEnabled ? new SignalPersistenceWriter() : null;
@@ -58,24 +45,15 @@ public class Main {
         TelemetryWriter telemetryWriter = questDbEnabled ? new TelemetryWriter() : null;
         HeavyweightWriter heavyweightWriter = questDbEnabled ? new HeavyweightWriter() : null;
 
-        VolumeBarGenerator volumeBarGenerator = new VolumeBarGenerator(volumeThreshold, bar -> {
-            auctionProfileCalculator.onVolumeBar(bar);
-            signalEngine.onVolumeBar(bar);
-            String friendlySymbol = instrumentMaster.getInstrument(bar.getSymbol())
-                    .map(InstrumentMaster.InstrumentDefinition::getTradingSymbol)
-                    .orElse(bar.getSymbol());
-            logger.info("New Volume Bar: {} ({}) | O: {} H: {} L: {} C: {} V: {}",
-                    bar.getSymbol(), friendlySymbol, bar.getOpen(), bar.getHigh(), bar.getLow(), bar.getClose(), bar.getVolume());
-        });
-
-        // Paper Trading Setup
         VirtualPositionManager virtualPositionManager = new VirtualPositionManager();
         PaperTradingEngine paperTradingEngine = new PaperTradingEngine(virtualPositionManager);
+
+        List<EventHandler<MarketEvent>> marketEventHandlers = new ArrayList<>();
 
         DisruptorManager disruptorManager = new DisruptorManager(
                 questDBWriter,
                 rawFeedWriter,
-                volumeBarGenerator,
+                marketEventHandlers,
                 indexWeightCalculator,
                 optionChainProvider,
                 thetaExitGuard,
@@ -86,15 +64,25 @@ public class Main {
                 List.of((event, seq, end) -> DashboardBridge.onMarketEvent(event)),
                 paperTradingEngine);
 
-        signalEngine.setSignalRingBuffer(disruptorManager.getSignalRingBuffer());
+        AlphaPulseEngine alphaPulseEngine = new AlphaPulseEngine(disruptorManager.getSignalRingBuffer(), indexInstrumentKey, instrumentMaster);
+
+        marketEventHandlers.add((event, sequence, endOfBatch) -> alphaPulseEngine.onMarketEvent(event));
+
+        disruptorManager.start();
+
+        InstrumentLoader loader = new InstrumentLoader("instruments.db", "NSE.JSON.gz", "NSE.json");
+        AutoInstrumentManager autoInstrumentManager = new AutoInstrumentManager(loader, "mapped_instruments.json");
+        autoInstrumentManager.initialize();
+        DashboardBridge.setNiftyFutureKey(autoInstrumentManager.getNiftyFutureKey());
+
         orderManager.setOrderRingBuffer(disruptorManager.getOrderRingBuffer());
         indexWeightCalculator.setHeavyweightRingBuffer(disruptorManager.getHeavyweightRingBuffer());
 
         if (dashboardEnabled) {
             com.trading.hf.dashboard.DashboardBridge.start(
-                    volumeBarGenerator,
-                    signalEngine,
-                    auctionProfileCalculator,
+                    new VolumeBarGenerator(0, bar -> {}),
+                    new SignalEngine(null),
+                    new AuctionProfileCalculator(),
                     indexWeightCalculator,
                     optionChainProvider,
                     positionManager,
@@ -104,7 +92,6 @@ public class Main {
         }
 
         if ("live".equalsIgnoreCase(runMode)) {
-            // --- Live Mode ---
             logger.info("Starting application in LIVE mode.");
             String accessToken = ConfigLoader.getProperty("upstox.access.token");
             if (accessToken == null || "YOUR_ACCESS_TOKEN_HERE".equals(accessToken)) {
@@ -113,15 +100,12 @@ public class Main {
             }
 
             Set<String> initialInstrumentKeys = new HashSet<>();
-
-            // Add Nifty Index and Future from mapping
             String niftyIndexKey = autoInstrumentManager.getNiftyIndexKey();
             if (niftyIndexKey != null) initialInstrumentKeys.add(niftyIndexKey);
 
             String niftyFutureKey = autoInstrumentManager.getNiftyFutureKey();
             if (niftyFutureKey != null) initialInstrumentKeys.add(niftyFutureKey);
 
-            // Add Equities from mapping
             Map<String, String> equities = (Map<String, String>) autoInstrumentManager.getMappedKeys().get("equities");
             if (equities != null) {
                 for (Map.Entry<String, String> entry : equities.entrySet()) {
@@ -130,26 +114,22 @@ public class Main {
                 }
             }
 
-            // Add Nifty Options from mapping
             List<String> optionKeys = (List<String>) autoInstrumentManager.getMappedKeys().get("nifty_options");
             if (optionKeys != null) initialInstrumentKeys.addAll(optionKeys);
 
             initialInstrumentKeys.add("NSE_INDEX|Nifty Bank");
 
-            // Dynamically find the near-month Bank Nifty Future (as backup)
             if (!initialInstrumentKeys.contains("NSE_INDEX|Nifty Bank")) {
                 instrumentMaster.findNearestExpiry("NSE_INDEX|Nifty Bank", java.time.LocalDate.now()).ifPresent(expiry -> {
                     instrumentMaster.findInstrumentKey("NSE_INDEX|Nifty Bank", 0, "FUT", expiry).ifPresent(key -> {
                         initialInstrumentKeys.add(key);
-                        logger.info("Dynamically added Bank Nifty Future: {}", key);
                     });
                 });
             }
 
-            // For now, let's just make sure we add the heavyweights if not already present
             initialInstrumentKeys.addAll(indexWeightCalculator.getInstrumentKeys());
 
-            orderManager.setAccessToken(accessToken); // Update order manager with token
+            orderManager.setAccessToken(accessToken);
 
             UpstoxOptionContractService optionContractService = new UpstoxOptionContractService(accessToken);
 
@@ -170,11 +150,9 @@ public class Main {
 
                 if (!toSubscribe.isEmpty()) {
                     marketDataStreamer.subscribe(toSubscribe);
-                    logger.info("Subscribing to: {}", toSubscribe);
                 }
                 if (!toUnsubscribe.isEmpty()) {
                     marketDataStreamer.unsubscribe(toUnsubscribe);
-                    logger.info("Unsubscribing from: {}", toUnsubscribe);
                 }
             }, instrumentMaster, indexInstrumentKey, optionContractService);
 
@@ -190,10 +168,9 @@ public class Main {
             }));
 
         } else {
-            // --- Simulation Mode ---
             logger.info("Starting application in SIMULATION mode.");
 
-            String replaySource = ConfigLoader.getProperty("replay.source", "questdb");
+            String replaySource = ConfigLoader.getProperty("replay.source", "sample_data");
             IDataReplayer replayer;
 
             switch (replaySource) {
@@ -208,10 +185,9 @@ public class Main {
                     return;
             }
 
-            replayer.start(); // This will block until replay is complete
+            replayer.start();
 
             try {
-                // Give logs a moment to flush before shutting down
                 Thread.sleep(2000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -219,21 +195,16 @@ public class Main {
 
             logger.info("Simulation finished. Server will remain active for dashboard connection.");
 
-            // Keep the main thread alive to allow the dashboard to be viewed.
-            // The shutdown hook will handle closing resources.
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                logger.info("Shutdown hook initiated.");
                 disruptorManager.shutdown();
                 if (questDBWriter != null)
                     questDBWriter.close();
-                logger.info("Resources released.");
             }));
 
             while (true) {
                 try {
-                    Thread.sleep(10000); // Sleep indefinitely
+                    Thread.sleep(10000);
                 } catch (InterruptedException e) {
-                    logger.warn("Main thread interrupted, shutting down.");
                     Thread.currentThread().interrupt();
                     break;
                 }

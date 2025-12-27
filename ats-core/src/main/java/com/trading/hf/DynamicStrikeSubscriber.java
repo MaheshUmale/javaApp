@@ -72,7 +72,7 @@ public class DynamicStrikeSubscriber {
         }
 
         Set<String> newSubscriptions = new HashSet<>();
-        for (int i = -2; i <= 2; i++) {
+        for (int i = -1; i <= 1; i++) {
             int strike = currentATM + (i * 50);
             instrumentMaster.findInstrumentKey(underlying, strike, "CE", currentExpiry).ifPresent(newSubscriptions::add);
             instrumentMaster.findInstrumentKey(underlying, strike, "PE", currentExpiry).ifPresent(newSubscriptions::add);
